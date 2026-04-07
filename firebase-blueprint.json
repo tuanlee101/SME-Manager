@@ -1,0 +1,86 @@
+{
+  "entities": {
+    "Category": {
+      "title": "Category",
+      "description": "Product categories",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "isDeleted": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name"]
+    },
+    "Product": {
+      "title": "Product",
+      "description": "Business products",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "buyPrice": { "type": "number" },
+        "sellPrice": { "type": "number" },
+        "stock": { "type": "number" },
+        "unit": { "type": "string" },
+        "image": { "type": "string" },
+        "categoryId": { "type": "string" },
+        "isDeleted": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "buyPrice", "sellPrice", "stock", "categoryId"]
+    },
+    "Customer": {
+      "title": "Customer",
+      "description": "Business customers",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string" },
+        "address": { "type": "string" },
+        "isDeleted": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name"]
+    },
+    "Invoice": {
+      "title": "Invoice",
+      "description": "Sales invoices",
+      "type": "object",
+      "properties": {
+        "number": { "type": "string" },
+        "customerId": { "type": "string" },
+        "totalAmount": { "type": "number" },
+        "status": { "type": "string", "enum": ["pending", "paid", "cancelled"] },
+        "isDeleted": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["number", "customerId", "totalAmount", "status"]
+    },
+    "InvoiceItem": {
+      "title": "InvoiceItem",
+      "description": "Items within an invoice",
+      "type": "object",
+      "properties": {
+        "invoiceId": { "type": "string" },
+        "productId": { "type": "string" },
+        "quantity": { "type": "number" },
+        "price": { "type": "number" },
+        "total": { "type": "number" }
+      },
+      "required": ["invoiceId", "productId", "quantity", "price", "total"]
+    }
+  },
+  "firestore": {
+    "categories": { "schema": "Category", "description": "Collection of product categories" },
+    "products": { "schema": "Product", "description": "Collection of products" },
+    "customers": { "schema": "Customer", "description": "Collection of customers" },
+    "invoices": { "schema": "Invoice", "description": "Collection of invoices" },
+    "invoiceItems": { "schema": "InvoiceItem", "description": "Collection of invoice items" }
+  }
+}

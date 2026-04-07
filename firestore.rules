@@ -1,0 +1,119 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: categories
+    // Fields: name (string), description (string), isDeleted (bool), createdAt (timestamp), updatedAt (timestamp)
+    //
+    // Collection: products
+    // Fields: name (string), buyPrice (number), sellPrice (number), stock (number), unit (string), categoryId (string), isDeleted (bool)
+    //
+    // Collection: customers
+    // Fields: name (string), phone (string), email (string), address (string), isDeleted (bool)
+    //
+    // Collection: invoices
+    // Fields: number (string), customerId (string), totalAmount (number), status (string), isDeleted (bool)
+    //
+    // Collection: invoiceItems
+    // Fields: invoiceId (string), productId (string), quantity (number), price (number), total (number)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && 
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+         (request.auth.token.email == "tuanlee101.dev@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    // ===============================================================
+    // Validation Functions
+    // ===============================================================
+
+    function isValidCategory(data) {
+      return data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             (data.description == null || (data.description is string && data.description.size() < 500));
+    }
+
+    function isValidProduct(data) {
+      return data.name is string && data.name.size() > 0 && data.name.size() < 200 &&
+             data.buyPrice is number && data.buyPrice >= 0 &&
+             data.sellPrice is number && data.sellPrice >= 0 &&
+             data.stock is number &&
+             data.categoryId is string;
+    }
+
+    function isValidCustomer(data) {
+      return data.name is string && data.name.size() > 0 && data.name.size() < 100;
+    }
+
+    function isValidInvoice(data) {
+      return data.number is string && data.customerId is string &&
+             data.totalAmount is number && data.totalAmount >= 0 &&
+             data.status in ['pending', 'paid', 'cancelled'];
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      allow write: if isAdmin();
+    }
+
+    match /categories/{catId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidCategory(request.resource.data);
+      allow update: if isAuthenticated() && isValidCategory(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /products/{prodId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidProduct(request.resource.data);
+      allow update: if isAuthenticated() && isValidProduct(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /customers/{custId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidCustomer(request.resource.data);
+      allow update: if isAuthenticated() && isValidCustomer(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /invoices/{invId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidInvoice(request.resource.data);
+      allow update: if isAuthenticated() && isValidInvoice(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /invoiceItems/{itemId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated();
+      allow delete: if isAdmin();
+    }
+
+    match /test/connection {
+      allow read: if true;
+    }
+  }
+}
