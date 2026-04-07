@@ -292,9 +292,21 @@ export const bulkDeleteCustomers = async (ids: string[]) => {
 // --- Invoices ---
 export const getInvoices = (callback: (data: any[]) => void) => {
   const q = query(collection(db, "invoices"), where("isDeleted", "==", false), orderBy("createdAt", "desc"));
-  return onSnapshot(q, (snapshot) => {
-    const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-    callback(data);
+  return onSnapshot(q, async (snapshot) => {
+    const invoices = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
+    if (invoices.length === 0) { callback([]); return; }
+
+    // Join customer info
+    const customerIds = [...new Set(invoices.map(inv => inv.customerId).filter(Boolean))];
+    const customerMap: Record<string, any> = {};
+    await Promise.all(
+      customerIds.map(async (id) => {
+        const snap = await getDoc(doc(db, "customers", id as string));
+        if (snap.exists()) customerMap[id as string] = { id: snap.id, ...snap.data() };
+      })
+    );
+
+    callback(invoices.map(inv => ({ ...inv, customer: customerMap[inv.customerId] ?? null })));
   }, (error) => handleFirestoreError(error, OperationType.LIST, "invoices"));
 };
 
@@ -313,20 +325,21 @@ export const bulkDeleteInvoices = async (ids: string[]) => {
 export const createInvoice = async (data: { customerId: string, items: any[], status: string }) => {
   const { customerId, items, status } = data;
   try {
+    // Get invoice count outside transaction (getDocs not allowed inside runTransaction)
+    const countSnap = await getDocs(query(collection(db, "invoices")));
+    const number = `INV-${new Date().getFullYear()}-${(countSnap.size + 1).toString().padStart(4, "0")}`;
+    const totalAmount = items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+
     return await runTransaction(db, async (transaction) => {
-      // 1. Get invoice count for number
-      const q = query(collection(db, "invoices"));
-      const snapshot = await getDocs(q);
-      const count = snapshot.size;
-      const number = `INV-${new Date().getFullYear()}-${(count + 1).toString().padStart(4, "0")}`;
+      // PHASE 1: All reads first
+      const prodRefs = items.map(item => doc(db, "products", item.productId));
+      const prodSnaps = await Promise.all(prodRefs.map(ref => transaction.get(ref)));
 
-      const total = items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-
-      // 2. Create invoice
+      // PHASE 2: All writes
       const invRef = doc(collection(db, "invoices"));
       transaction.set(invRef, {
         customerId,
-        total,
+        totalAmount,
         status,
         number,
         isDeleted: false,
@@ -334,8 +347,8 @@ export const createInvoice = async (data: { customerId: string, items: any[], st
         updatedAt: serverTimestamp()
       });
 
-      // 3. Create items and update stock
-      for (const item of items) {
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
         const itemRef = doc(collection(db, "invoiceItems"));
         transaction.set(itemRef, {
           ...item,
@@ -343,12 +356,10 @@ export const createInvoice = async (data: { customerId: string, items: any[], st
           createdAt: serverTimestamp()
         });
 
-        // Update stock
-        const prodRef = doc(db, "products", item.productId);
-        const prodSnap = await transaction.get(prodRef);
+        const prodSnap = prodSnaps[i];
         if (prodSnap.exists()) {
           const currentStock = prodSnap.data().stock || 0;
-          transaction.update(prodRef, { stock: currentStock - item.quantity });
+          transaction.update(prodRefs[i], { stock: currentStock - item.quantity });
         }
       }
 
@@ -378,6 +389,27 @@ export const getDashboardStats = (callback: (data: any) => void) => {
       topProducts: [] // Simplified for now
     });
   }, (error) => handleFirestoreError(error, OperationType.GET, "dashboard/stats"));
+};
+
+export const getReportData = (
+  callback: (data: { invoices: any[]; invoiceItems: any[]; productMap: Record<string, any> }) => void
+) => {
+  const q = query(collection(db, "invoices"), where("isDeleted", "==", false));
+  return onSnapshot(q, async (snapshot) => {
+    try {
+      const invoices = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as any));
+      const [itemsSnap, productsSnap] = await Promise.all([
+        getDocs(collection(db, "invoiceItems")),
+        getDocs(query(collection(db, "products"), where("isDeleted", "==", false))),
+      ]);
+      const invoiceItems = itemsSnap.docs.map(d => ({ id: d.id, ...d.data() } as any));
+      const productMap: Record<string, any> = {};
+      productsSnap.docs.forEach(d => { productMap[d.id] = { id: d.id, ...d.data() }; });
+      callback({ invoices, invoiceItems, productMap });
+    } catch (error) {
+      handleFirestoreError(error, OperationType.LIST, "reports");
+    }
+  });
 };
 
 export const getReports = (callback: (data: any) => void) => {

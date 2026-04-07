@@ -1,7 +1,7 @@
 import React from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { getCustomers, createCustomer, updateCustomer, deleteCustomer, bulkDeleteCustomers } from "../services/firebaseService";
-import { Plus, Search, Edit2, Trash2, X, User, Phone, Mail, MapPin, History, ChevronRight } from "lucide-react";
+import { useMutation } from "@tanstack/react-query";
+import { getCustomers, createCustomer, updateCustomer, deleteCustomer } from "../services/firebaseService";
+import { Plus, Edit2, Trash2, X, Phone, Mail, MapPin, History, ChevronRight } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
 const formatCurrency = (amount: number) => {
@@ -9,18 +9,10 @@ const formatCurrency = (amount: number) => {
 };
 
 export default function Customers() {
-  const queryClient = useQueryClient();
   const [isModalOpen, setIsModalOpen] = React.useState(false);
   const [editingCustomer, setEditingCustomer] = React.useState<any>(null);
-  const [customers, setCategories] = React.useState<any[]>([]);
+  const [customers, setCustomers] = React.useState<any[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
-  const [selected, setSelected] = React.useState<Set<string>>(new Set());
-
-  const toggleOne = (id: string) => setSelected(prev => {
-    const next = new Set(prev);
-    next.has(id) ? next.delete(id) : next.add(id);
-    return next;
-  });
   const [formData, setFormData] = React.useState({
     name: "",
     phone: "",
@@ -30,7 +22,7 @@ export default function Customers() {
 
   React.useEffect(() => {
     const unsubscribe = getCustomers(null, (data) => {
-      setCategories(data);
+      setCustomers(data);
       setIsLoading(false);
     });
     return () => unsubscribe();
@@ -48,11 +40,6 @@ export default function Customers() {
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => deleteCustomer(id),
-  });
-
-  const bulkDeleteMutation = useMutation({
-    mutationFn: (ids: string[]) => bulkDeleteCustomers(ids),
-    onSuccess: () => setSelected(new Set()),
   });
 
   const openModal = (customer?: any) => {
@@ -96,47 +83,25 @@ export default function Customers() {
           <h2 className="text-3xl font-bold text-gray-900 tracking-tight">Khách hàng</h2>
           <p className="text-gray-500 mt-1">Quản lý thông tin và lịch sử mua hàng của khách.</p>
         </div>
-        <div className="flex items-center gap-3">
-          {selected.size > 0 && (
-            <button
-              onClick={() => {
-                if (confirm(`Xóa ${selected.size} khách hàng đã chọn?`)) {
-                  bulkDeleteMutation.mutate(Array.from(selected));
-                }
-              }}
-              className="bg-red-500 text-white px-6 py-3 rounded-2xl font-semibold shadow-lg shadow-red-200 hover:bg-red-600 transition-all flex items-center gap-2"
-            >
-              <Trash2 size={16} /> Xóa {selected.size} mục
-            </button>
-          )}
-          <button
-            onClick={() => openModal()}
-            className="bg-blue-600 text-white px-6 py-3 rounded-2xl font-semibold shadow-lg shadow-blue-200 hover:bg-blue-700 transition-all flex items-center gap-2"
-          >
-            <Plus size={20} /> Thêm khách hàng
-          </button>
-        </div>
+        <button
+          onClick={() => openModal()}
+          className="bg-blue-600 text-white px-6 py-3 rounded-2xl font-semibold shadow-lg shadow-blue-200 hover:bg-blue-700 transition-all flex items-center gap-2"
+        >
+          <Plus size={20} /> Thêm khách hàng
+        </button>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
-        {customers?.map((customer: any) => (
+        {customers.map((customer: any) => (
           <motion.div
             key={customer.id}
             whileHover={{ y: -4 }}
-            className={`bg-white p-6 rounded-3xl border shadow-sm shadow-gray-200/50 flex flex-col gap-6 relative group transition-colors ${selected.has(customer.id) ? "border-blue-400 bg-blue-50/30" : "border-gray-100"}`}
+            className="bg-white p-6 rounded-3xl border border-gray-100 shadow-sm shadow-gray-200/50 flex flex-col gap-6 relative group"
           >
             <div className="flex items-start justify-between">
               <div className="flex items-center gap-4">
-                <div className="relative">
-                  <div className="w-14 h-14 bg-blue-50 rounded-2xl flex items-center justify-center text-blue-600 font-bold text-xl border-2 border-white shadow-sm">
-                    {customer.name.charAt(0)}
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={selected.has(customer.id)}
-                    onChange={() => toggleOne(customer.id)}
-                    className="absolute -top-1.5 -left-1.5 w-4 h-4 rounded accent-blue-600 cursor-pointer"
-                  />
+                <div className="w-14 h-14 bg-blue-50 rounded-2xl flex items-center justify-center text-blue-600 font-bold text-xl border-2 border-white shadow-sm">
+                  {customer.name.charAt(0)}
                 </div>
                 <div>
                   <h3 className="font-bold text-gray-900 text-lg">{customer.name}</h3>
@@ -182,15 +147,15 @@ export default function Customers() {
               <div>
                 <p className="text-xs text-gray-400 uppercase font-bold tracking-wider">Tổng chi tiêu</p>
                 <p className="font-bold text-blue-600">
-                  {formatCurrency(customer.invoices.reduce((sum: number, inv: any) => sum + inv.totalAmount, 0))}
+                  {formatCurrency((customer.invoices ?? []).reduce((sum: number, inv: any) => sum + inv.totalAmount, 0))}
                 </p>
               </div>
               <div className="text-right">
                 <p className="text-xs text-gray-400 uppercase font-bold tracking-wider">Đơn hàng</p>
-                <p className="font-bold text-gray-900">{customer.invoices.length}</p>
+                <p className="font-bold text-gray-900">{(customer.invoices ?? []).length}</p>
               </div>
             </div>
-            
+
             <button className="w-full py-3 bg-gray-50 text-gray-600 text-sm font-semibold rounded-xl hover:bg-blue-50 hover:text-blue-600 transition-all flex items-center justify-center gap-2">
               <History size={16} /> Xem lịch sử mua hàng <ChevronRight size={16} />
             </button>

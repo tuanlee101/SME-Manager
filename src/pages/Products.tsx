@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getProducts, getCategories, createProduct, updateProduct, deleteProduct, bulkCreateProducts, getOrCreateCategory, bulkDeleteProducts, uploadProductImage } from "../services/firebaseService";
 import { cn } from "../lib/utils";
 import { Plus, Search, Edit2, Trash2, X, Package, AlertTriangle, Filter, ChevronDown, Download, Upload, ImageIcon } from "lucide-react";
+import Pagination from "../components/Pagination";
 import { motion, AnimatePresence } from "motion/react";
 import * as XLSX from "xlsx";
 
@@ -20,9 +21,12 @@ export default function Products() {
   const [categories, setCategories] = React.useState<any[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
   const [selected, setSelected] = React.useState<Set<string>>(new Set());
+  const [page, setPage] = React.useState(1);
+  const [pageSize, setPageSize] = React.useState(10);
 
-  const allSelected = products.length > 0 && selected.size === products.length;
-  const toggleAll = () => setSelected(allSelected ? new Set() : new Set(products.map(p => p.id)));
+  const paginatedProducts = products.slice((page - 1) * pageSize, page * pageSize);
+  const allSelected = paginatedProducts.length > 0 && paginatedProducts.every(p => selected.has(p.id));
+  const toggleAll = () => setSelected(allSelected ? new Set([...selected].filter(id => !paginatedProducts.find(p => p.id === id))) : new Set([...selected, ...paginatedProducts.map(p => p.id)]));
   const toggleOne = (id: string) => setSelected(prev => {
     const next = new Set(prev);
     next.has(id) ? next.delete(id) : next.add(id);
@@ -45,6 +49,7 @@ export default function Products() {
     const unsubscribe = getProducts(categoryId || null, search || null, (data) => {
       setProducts(data);
       setIsLoading(false);
+      setPage(1);
     });
     return () => unsubscribe();
   }, [categoryId, search]);
@@ -117,7 +122,7 @@ export default function Products() {
     
     const data = products.map((p: any) => ({
       "Tên sản phẩm": p.name,
-      "Danh mục": p.category?.name,
+      "Danh mục": categories.find(c => c.id === p.categoryId)?.name,
       "Giá nhập": p.buyPrice,
       "Giá bán": p.sellPrice,
       "Tồn kho": p.stock,
@@ -335,7 +340,7 @@ export default function Products() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {products?.map((product: any) => (
+              {paginatedProducts?.map((product: any) => (
                 <tr key={product.id} className={`hover:bg-gray-50/50 transition-colors group ${selected.has(product.id) ? "bg-blue-50/50" : ""}`}>
                   <td className="px-6 py-5">
                     <input type="checkbox" checked={selected.has(product.id)} onChange={() => toggleOne(product.id)} className="w-4 h-4 rounded accent-blue-600 cursor-pointer" />
@@ -357,7 +362,7 @@ export default function Products() {
                   </td>
                   <td className="px-8 py-5">
                     <span className="px-3 py-1 bg-blue-50 text-blue-600 rounded-full text-xs font-bold">
-                      {product.category?.name}
+                      {categories.find(c => c.id === product.categoryId)?.name}
                     </span>
                   </td>
                   <td className="px-8 py-5">
@@ -402,6 +407,13 @@ export default function Products() {
             </tbody>
           </table>
         </div>
+        <Pagination
+          page={page}
+          pageSize={pageSize}
+          total={products.length}
+          onPageChange={setPage}
+          onPageSizeChange={setPageSize}
+        />
       </div>
 
       {/* Modal */}

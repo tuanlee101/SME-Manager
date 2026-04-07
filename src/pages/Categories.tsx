@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getCategories, createCategory, updateCategory, deleteCategory, bulkDeleteCategories } from "../services/firebaseService";
 import { Plus, Search, Edit2, Trash2, X, Tags } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
+import Pagination from "../components/Pagination";
 
 export default function Categories() {
   const queryClient = useQueryClient();
@@ -12,9 +13,14 @@ export default function Categories() {
   const [categories, setCategories] = React.useState<any[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
   const [selected, setSelected] = React.useState<Set<string>>(new Set());
+  const [search, setSearch] = React.useState("");
+  const [page, setPage] = React.useState(1);
+  const [pageSize, setPageSize] = React.useState(10);
 
-  const allSelected = categories.length > 0 && selected.size === categories.length;
-  const toggleAll = () => setSelected(allSelected ? new Set() : new Set(categories.map(c => c.id)));
+  const filtered = categories.filter(c => c.name.toLowerCase().includes(search.toLowerCase()));
+  const paginatedCategories = filtered.slice((page - 1) * pageSize, page * pageSize);
+  const allSelected = paginatedCategories.length > 0 && paginatedCategories.every(c => selected.has(c.id));
+  const toggleAll = () => setSelected(allSelected ? new Set([...selected].filter(id => !paginatedCategories.find(c => c.id === id))) : new Set([...selected, ...paginatedCategories.map(c => c.id)]));
   const toggleOne = (id: string) => setSelected(prev => {
     const next = new Set(prev);
     next.has(id) ? next.delete(id) : next.add(id);
@@ -113,6 +119,8 @@ export default function Categories() {
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
             <input
               type="text"
+              value={search}
+              onChange={(e) => { setSearch(e.target.value); setPage(1); }}
               placeholder="Tìm kiếm danh mục..."
               className="w-full pl-12 pr-4 py-3 bg-gray-50 border-none rounded-xl text-sm focus:ring-2 focus:ring-blue-500 transition-all outline-none"
             />
@@ -133,7 +141,7 @@ export default function Categories() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {categories?.map((category: any) => (
+              {paginatedCategories?.map((category: any) => (
                 <tr key={category.id} className={`hover:bg-gray-50/50 transition-colors group ${selected.has(category.id) ? "bg-blue-50/50" : ""}`}>
                   <td className="px-6 py-5">
                     <input type="checkbox" checked={selected.has(category.id)} onChange={() => toggleOne(category.id)} className="w-4 h-4 rounded accent-blue-600 cursor-pointer" />
@@ -179,6 +187,13 @@ export default function Categories() {
             </tbody>
           </table>
         </div>
+        <Pagination
+          page={page}
+          pageSize={pageSize}
+          total={filtered.length}
+          onPageChange={setPage}
+          onPageSizeChange={setPageSize}
+        />
       </div>
 
       {/* Modal */}

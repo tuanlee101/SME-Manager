@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { getInvoices, bulkDeleteInvoices } from "../services/firebaseService";
 import { cn } from "../lib/utils";
 import { Plus, Search, FileText, Download, Eye, Calendar, User, Trash2 } from "lucide-react";
+import Pagination from "../components/Pagination";
 import { format } from "date-fns";
 import { motion } from "motion/react";
 
@@ -17,9 +18,17 @@ export default function Invoices() {
   const [invoices, setInvoices] = React.useState<any[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
   const [selected, setSelected] = React.useState<Set<string>>(new Set());
+  const [search, setSearch] = React.useState("");
+  const [page, setPage] = React.useState(1);
+  const [pageSize, setPageSize] = React.useState(10);
 
-  const allSelected = invoices.length > 0 && selected.size === invoices.length;
-  const toggleAll = () => setSelected(allSelected ? new Set() : new Set(invoices.map(i => i.id)));
+  const filtered = invoices.filter(inv =>
+    inv.number?.toLowerCase().includes(search.toLowerCase()) ||
+    inv.customer?.name?.toLowerCase().includes(search.toLowerCase())
+  );
+  const paginatedInvoices = filtered.slice((page - 1) * pageSize, page * pageSize);
+  const allSelected = paginatedInvoices.length > 0 && paginatedInvoices.every(i => selected.has(i.id));
+  const toggleAll = () => setSelected(allSelected ? new Set([...selected].filter(id => !paginatedInvoices.find(i => i.id === id))) : new Set([...selected, ...paginatedInvoices.map(i => i.id)]));
   const toggleOne = (id: string) => setSelected(prev => {
     const next = new Set(prev);
     next.has(id) ? next.delete(id) : next.add(id);
@@ -35,6 +44,7 @@ export default function Invoices() {
     const unsubscribe = getInvoices((data) => {
       setInvoices(data);
       setIsLoading(false);
+      setPage(1);
     });
     return () => unsubscribe();
   }, []);
@@ -78,6 +88,8 @@ export default function Invoices() {
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
             <input
               type="text"
+              value={search}
+              onChange={(e) => { setSearch(e.target.value); setPage(1); }}
               placeholder="Tìm kiếm hóa đơn..."
               className="w-full pl-12 pr-4 py-3 bg-gray-50 border-none rounded-xl text-sm focus:ring-2 focus:ring-blue-500 transition-all outline-none"
             />
@@ -100,7 +112,7 @@ export default function Invoices() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {invoices?.map((invoice: any) => (
+              {paginatedInvoices.map((invoice: any) => (
                 <tr key={invoice.id} className={`hover:bg-gray-50/50 transition-colors group ${selected.has(invoice.id) ? "bg-blue-50/50" : ""}`}>
                   <td className="px-6 py-5">
                     <input type="checkbox" checked={selected.has(invoice.id)} onChange={() => toggleOne(invoice.id)} className="w-4 h-4 rounded accent-blue-600 cursor-pointer" />
@@ -122,7 +134,7 @@ export default function Invoices() {
                   <td className="px-8 py-5">
                     <div className="flex items-center gap-2 text-sm text-gray-500">
                       <Calendar size={14} />
-                      {format(new Date(invoice.createdAt), "dd/MM/yyyy")}
+                      {invoice.createdAt ? format(invoice.createdAt.toDate ? invoice.createdAt.toDate() : new Date(invoice.createdAt), "dd/MM/yyyy") : "—"}
                     </div>
                   </td>
                   <td className="px-8 py-5">
@@ -154,6 +166,13 @@ export default function Invoices() {
             </tbody>
           </table>
         </div>
+        <Pagination
+          page={page}
+          pageSize={pageSize}
+          total={filtered.length}
+          onPageChange={setPage}
+          onPageSizeChange={setPageSize}
+        />
       </div>
     </div>
   );
