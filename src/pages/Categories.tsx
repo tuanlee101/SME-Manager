@@ -1,7 +1,7 @@
 import React from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { getCategories, createCategory, updateCategory, deleteCategory } from "../services/firebaseService";
-import { Plus, Search, MoreVertical, Edit2, Trash2, X, Check, Tags, Info } from "lucide-react";
+import { getCategories, createCategory, updateCategory, deleteCategory, bulkDeleteCategories } from "../services/firebaseService";
+import { Plus, Search, Edit2, Trash2, X, Tags } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
 export default function Categories() {
@@ -11,6 +11,15 @@ export default function Categories() {
   const [formData, setFormData] = React.useState({ name: "", description: "" });
   const [categories, setCategories] = React.useState<any[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
+  const [selected, setSelected] = React.useState<Set<string>>(new Set());
+
+  const allSelected = categories.length > 0 && selected.size === categories.length;
+  const toggleAll = () => setSelected(allSelected ? new Set() : new Set(categories.map(c => c.id)));
+  const toggleOne = (id: string) => setSelected(prev => {
+    const next = new Set(prev);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
+  });
 
   React.useEffect(() => {
     const unsubscribe = getCategories((data) => {
@@ -32,6 +41,11 @@ export default function Categories() {
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => deleteCategory(id),
+  });
+
+  const bulkDeleteMutation = useMutation({
+    mutationFn: (ids: string[]) => bulkDeleteCategories(ids),
+    onSuccess: () => setSelected(new Set()),
   });
 
   const openModal = (category?: any) => {
@@ -71,12 +85,26 @@ export default function Categories() {
           <h2 className="text-3xl font-bold text-gray-900 tracking-tight">Danh mục</h2>
           <p className="text-gray-500 mt-1">Quản lý các nhóm sản phẩm của bạn.</p>
         </div>
-        <button
-          onClick={() => openModal()}
-          className="bg-blue-600 text-white px-6 py-3 rounded-2xl font-semibold shadow-lg shadow-blue-200 hover:bg-blue-700 transition-all flex items-center gap-2"
-        >
-          <Plus size={20} /> Thêm danh mục
-        </button>
+        <div className="flex items-center gap-3">
+          {selected.size > 0 && (
+            <button
+              onClick={() => {
+                if (confirm(`Xóa ${selected.size} danh mục đã chọn?`)) {
+                  bulkDeleteMutation.mutate(Array.from(selected));
+                }
+              }}
+              className="bg-red-500 text-white px-6 py-3 rounded-2xl font-semibold shadow-lg shadow-red-200 hover:bg-red-600 transition-all flex items-center gap-2"
+            >
+              <Trash2 size={18} /> Xóa {selected.size} mục
+            </button>
+          )}
+          <button
+            onClick={() => openModal()}
+            className="bg-blue-600 text-white px-6 py-3 rounded-2xl font-semibold shadow-lg shadow-blue-200 hover:bg-blue-700 transition-all flex items-center gap-2"
+          >
+            <Plus size={20} /> Thêm danh mục
+          </button>
+        </div>
       </div>
 
       <div className="bg-white rounded-3xl border border-gray-100 shadow-sm shadow-gray-200/50 overflow-hidden">
@@ -95,6 +123,9 @@ export default function Categories() {
           <table className="w-full text-left">
             <thead>
               <tr className="bg-gray-50/50 text-gray-500 text-xs font-bold uppercase tracking-wider">
+                <th className="px-6 py-4">
+                  <input type="checkbox" checked={allSelected} onChange={toggleAll} className="w-4 h-4 rounded accent-blue-600 cursor-pointer" />
+                </th>
                 <th className="px-8 py-4">Tên danh mục</th>
                 <th className="px-8 py-4">Mô tả</th>
                 <th className="px-8 py-4 text-center">Sản phẩm</th>
@@ -103,7 +134,10 @@ export default function Categories() {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {categories?.map((category: any) => (
-                <tr key={category.id} className="hover:bg-gray-50/50 transition-colors group">
+                <tr key={category.id} className={`hover:bg-gray-50/50 transition-colors group ${selected.has(category.id) ? "bg-blue-50/50" : ""}`}>
+                  <td className="px-6 py-5">
+                    <input type="checkbox" checked={selected.has(category.id)} onChange={() => toggleOne(category.id)} className="w-4 h-4 rounded accent-blue-600 cursor-pointer" />
+                  </td>
                   <td className="px-8 py-5">
                     <div className="flex items-center gap-3">
                       <div className="w-10 h-10 bg-blue-50 rounded-xl flex items-center justify-center text-blue-600">
@@ -117,7 +151,7 @@ export default function Categories() {
                   </td>
                   <td className="px-8 py-5 text-center">
                     <span className="px-3 py-1 bg-gray-100 text-gray-600 rounded-full text-xs font-bold">
-                      {category._count.products} sản phẩm
+                      {category._count?.products ?? 0} sản phẩm
                     </span>
                   </td>
                   <td className="px-8 py-5 text-right">

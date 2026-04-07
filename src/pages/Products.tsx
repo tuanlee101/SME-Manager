@@ -1,8 +1,8 @@
 import React from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { getProducts, getCategories, createProduct, updateProduct, deleteProduct, bulkCreateProducts } from "../services/firebaseService";
+import { getProducts, getCategories, createProduct, updateProduct, deleteProduct, bulkCreateProducts, getOrCreateCategory, bulkDeleteProducts, uploadProductImage } from "../services/firebaseService";
 import { cn } from "../lib/utils";
-import { Plus, Search, Edit2, Trash2, X, Package, AlertTriangle, Filter, ChevronDown, Image as ImageIcon, Download, Upload, FileSpreadsheet } from "lucide-react";
+import { Plus, Search, Edit2, Trash2, X, Package, AlertTriangle, Filter, ChevronDown, Download, Upload, ImageIcon } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import * as XLSX from "xlsx";
 
@@ -19,6 +19,15 @@ export default function Products() {
   const [products, setProducts] = React.useState<any[]>([]);
   const [categories, setCategories] = React.useState<any[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
+  const [selected, setSelected] = React.useState<Set<string>>(new Set());
+
+  const allSelected = products.length > 0 && selected.size === products.length;
+  const toggleAll = () => setSelected(allSelected ? new Set() : new Set(products.map(p => p.id)));
+  const toggleOne = (id: string) => setSelected(prev => {
+    const next = new Set(prev);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
+  });
   const [formData, setFormData] = React.useState({
     name: "",
     description: "",
@@ -29,6 +38,8 @@ export default function Products() {
     categoryId: "",
     image: "",
   });
+  const [uploadProgress, setUploadProgress] = React.useState<number | null>(null);
+  const [isDragging, setIsDragging] = React.useState(false);
 
   React.useEffect(() => {
     const unsubscribe = getProducts(categoryId || null, search || null, (data) => {
@@ -61,14 +72,45 @@ export default function Products() {
 
   const bulkCreateMutation = useMutation({
     mutationFn: (data: any) => bulkCreateProducts(data),
-    onSuccess: () => {
-      alert("Đã nhập dữ liệu thành công!");
-    },
-    onError: (err) => {
-      console.error(err);
-      alert("Lỗi khi nhập dữ liệu Excel. Hãy kiểm tra lại định dạng file.");
-    }
+    onSuccess: () => { alert("Đã nhập dữ liệu thành công!"); },
+    onError: (err) => { console.error(err); alert("Lỗi khi nhập dữ liệu Excel."); }
   });
+
+  const bulkDeleteMutation = useMutation({
+    mutationFn: (ids: string[]) => bulkDeleteProducts(ids),
+    onSuccess: () => setSelected(new Set()),
+  });
+
+  const handleImageUpload = async (file: File) => {
+    if (!file.type.startsWith("image/")) {
+      alert("Chỉ chấp nhận file ảnh (PNG, JPG, WEBP).");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      alert("Ảnh không được vượt quá 5MB.");
+      return;
+    }
+    try {
+      setUploadProgress(0);
+      const url = await uploadProductImage(file, setUploadProgress);
+      setFormData(prev => ({ ...prev, image: url }));
+    } catch (err: any) {
+      console.error("Upload error:", err);
+      const msg = err?.code === "storage/unauthorized"
+        ? "Không có quyền upload. Kiểm tra Storage Rules trong Firebase Console."
+        : err?.message || "Lỗi khi upload ảnh.";
+      alert(msg);
+    } finally {
+      setUploadProgress(null);
+    }
+  };
+
+  const handleImageDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) handleImageUpload(file);
+  };
 
   const handleExport = () => {
     if (!products || products.length === 0) return;
@@ -94,38 +136,63 @@ export default function Products() {
     if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = (evt) => {
+    reader.onload = async (evt) => {
       const bstr = evt.target?.result;
       const wb = XLSX.read(bstr, { type: "binary" });
       const wsname = wb.SheetNames[0];
       const ws = wb.Sheets[wsname];
       const data = XLSX.utils.sheet_to_json(ws);
 
-      // Map Excel columns to database fields
-      // Assuming headers match export exactly or are similar
-      const mappedData = data.map((row: any) => {
-        // Find category by name or use a default
-        const catName = row["Danh mục"] || row["Category"];
-        const category = categories?.find((c: any) => c.name === catName);
-        
-        return {
-          name: row["Tên sản phẩm"] || row["Name"],
-          buyPrice: Number(row["Giá nhập"] || row["Buy Price"] || 0),
-          sellPrice: Number(row["Giá bán"] || row["Sell Price"] || 0),
-          stock: Number(row["Tồn kho"] || row["Stock"] || 0),
-          unit: row["Đơn vị"] || row["Unit"] || "cái",
-          description: row["Mô tả"] || row["Description"] || "",
-          categoryId: category?.id || categories?.[0]?.id, // Default to first category if not found
-        };
-      }).filter(p => p.name); // Filter out empty rows
-
-      if (mappedData.length > 0) {
-        if (confirm(`Bạn có muốn nhập ${mappedData.length} sản phẩm từ file Excel?`)) {
-          bulkCreateMutation.mutate(mappedData);
-        }
+      const rows = data.filter((row: any) => row["Tên sản phẩm"] || row["Name"]);
+      if (rows.length === 0) {
+        alert("Không tìm thấy dữ liệu hợp lệ trong file Excel.");
+        e.target.value = "";
+        return;
       }
-      
-      // Reset input
+
+      if (!confirm(`Bạn có muốn nhập ${rows.length} sản phẩm từ file Excel?`)) {
+        e.target.value = "";
+        return;
+      }
+
+      try {
+        // Resolve categoryId sequentially to avoid race conditions creating duplicate categories
+        const categoryCache: Record<string, string> = {};
+        const mappedData: any[] = [];
+        for (const row of rows) {
+          const catName = (row["Danh mục"] || row["Category"] || "").trim();
+          let categoryId: string | null = null;
+
+          if (catName) {
+            const cacheKey = catName.toLowerCase();
+            if (categoryCache[cacheKey]) {
+              categoryId = categoryCache[cacheKey];
+            } else {
+              categoryId = await getOrCreateCategory(catName);
+              categoryCache[cacheKey] = categoryId;
+            }
+          } else {
+            categoryId = categories?.[0]?.id || null;
+          }
+
+          mappedData.push({
+            name: row["Tên sản phẩm"] || row["Name"] || "",
+            buyPrice: Number(row["Giá nhập"] || row["Buy Price"] || 0),
+            sellPrice: Number(row["Giá bán"] || row["Sell Price"] || 0),
+            stock: Number(row["Tồn kho"] || row["Stock"] || 0),
+            unit: row["Đơn vị"] || row["Unit"] || "cái",
+            description: row["Mô tả"] || row["Description"] || "",
+            categoryId,
+          });
+        }
+
+        const validData = mappedData.filter(p => p.name && p.categoryId);
+        bulkCreateMutation.mutate(validData);
+      } catch (err) {
+        console.error(err);
+        alert("Lỗi khi xử lý file Excel.");
+      }
+
       e.target.value = "";
     };
     reader.readAsBinaryString(file);
@@ -192,6 +259,18 @@ export default function Products() {
           <p className="text-gray-500 mt-1">Quản lý kho hàng và giá bán của bạn.</p>
         </div>
         <div className="flex items-center gap-3">
+          {selected.size > 0 && (
+            <button
+              onClick={() => {
+                if (confirm(`Xóa ${selected.size} sản phẩm đã chọn?`)) {
+                  bulkDeleteMutation.mutate(Array.from(selected));
+                }
+              }}
+              className="bg-red-500 text-white px-6 py-3 rounded-2xl font-semibold shadow-lg shadow-red-200 hover:bg-red-600 transition-all flex items-center gap-2"
+            >
+              <Trash2 size={18} /> Xóa {selected.size} mục
+            </button>
+          )}
           <label className="bg-white text-gray-700 border border-gray-200 px-6 py-3 rounded-2xl font-semibold shadow-sm hover:bg-gray-50 transition-all flex items-center gap-2 cursor-pointer">
             <Upload size={20} /> Nhập Excel
             <input type="file" accept=".xlsx, .xls" className="hidden" onChange={handleImport} />
@@ -245,6 +324,9 @@ export default function Products() {
           <table className="w-full text-left">
             <thead>
               <tr className="bg-gray-50/50 text-gray-500 text-xs font-bold uppercase tracking-wider">
+                <th className="px-6 py-4">
+                  <input type="checkbox" checked={allSelected} onChange={toggleAll} className="w-4 h-4 rounded accent-blue-600 cursor-pointer" />
+                </th>
                 <th className="px-8 py-4">Sản phẩm</th>
                 <th className="px-8 py-4">Danh mục</th>
                 <th className="px-8 py-4">Giá bán</th>
@@ -254,7 +336,10 @@ export default function Products() {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {products?.map((product: any) => (
-                <tr key={product.id} className="hover:bg-gray-50/50 transition-colors group">
+                <tr key={product.id} className={`hover:bg-gray-50/50 transition-colors group ${selected.has(product.id) ? "bg-blue-50/50" : ""}`}>
+                  <td className="px-6 py-5">
+                    <input type="checkbox" checked={selected.has(product.id)} onChange={() => toggleOne(product.id)} className="w-4 h-4 rounded accent-blue-600 cursor-pointer" />
+                  </td>
                   <td className="px-8 py-5">
                     <div className="flex items-center gap-4">
                       <div className="w-12 h-12 bg-gray-50 rounded-xl flex items-center justify-center text-gray-400 group-hover:bg-blue-50 group-hover:text-blue-600 transition-colors">
@@ -420,14 +505,51 @@ export default function Products() {
                   </div>
 
                   <div>
-                    <label className="block text-sm font-bold text-gray-700 mb-2">URL Hình ảnh</label>
-                    <input
-                      type="text"
-                      value={formData.image}
-                      onChange={(e) => setFormData({ ...formData, image: e.target.value })}
-                      className="w-full px-4 py-3 rounded-xl border border-gray-200 focus:ring-2 focus:ring-blue-500 outline-none transition-all"
-                      placeholder="https://..."
-                    />
+                    <label className="block text-sm font-bold text-gray-700 mb-2">Hình ảnh sản phẩm</label>
+                    <div
+                      onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+                      onDragLeave={() => setIsDragging(false)}
+                      onDrop={handleImageDrop}
+                      className={cn(
+                        "relative border-2 border-dashed rounded-xl transition-colors",
+                        isDragging ? "border-blue-400 bg-blue-50" : "border-gray-200 hover:border-blue-300"
+                      )}
+                    >
+                      {formData.image ? (
+                        <div className="relative group">
+                          <img src={formData.image} alt="preview" className="w-full h-40 object-cover rounded-xl" />
+                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity rounded-xl flex items-center justify-center gap-3">
+                            <label className="cursor-pointer bg-white text-gray-700 px-3 py-2 rounded-lg text-xs font-semibold hover:bg-gray-100 transition-colors flex items-center gap-1">
+                              <Upload size={14} /> Đổi ảnh
+                              <input type="file" accept="image/*" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) handleImageUpload(f); e.target.value = ""; }} />
+                            </label>
+                            <button type="button" onClick={() => setFormData(prev => ({ ...prev, image: "" }))} className="bg-red-500 text-white px-3 py-2 rounded-lg text-xs font-semibold hover:bg-red-600 transition-colors flex items-center gap-1">
+                              <X size={14} /> Xóa
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <label className="flex flex-col items-center justify-center h-40 cursor-pointer gap-2">
+                          {uploadProgress !== null ? (
+                            <div className="flex flex-col items-center gap-3 w-full px-8">
+                              <div className="w-full bg-gray-200 rounded-full h-2">
+                                <div className="bg-blue-600 h-2 rounded-full transition-all" style={{ width: `${uploadProgress}%` }} />
+                              </div>
+                              <span className="text-sm text-gray-500">Đang tải lên... {uploadProgress}%</span>
+                            </div>
+                          ) : (
+                            <>
+                              <div className="w-12 h-12 bg-gray-100 rounded-xl flex items-center justify-center text-gray-400">
+                                <ImageIcon size={24} />
+                              </div>
+                              <p className="text-sm text-gray-500">Kéo thả hoặc <span className="text-blue-600 font-semibold">chọn ảnh</span></p>
+                              <p className="text-xs text-gray-400">PNG, JPG, WEBP tối đa 5MB</p>
+                            </>
+                          )}
+                          <input type="file" accept="image/*" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) handleImageUpload(f); e.target.value = ""; }} />
+                        </label>
+                      )}
+                    </div>
                   </div>
 
                   <div className="md:col-span-2">
@@ -451,7 +573,7 @@ export default function Products() {
                   </button>
                   <button
                     type="submit"
-                    disabled={createMutation.isPending || updateMutation.isPending}
+                    disabled={createMutation.isPending || updateMutation.isPending || uploadProgress !== null}
                     className="flex-1 px-6 py-3 bg-blue-600 text-white font-semibold rounded-xl shadow-lg shadow-blue-200 hover:bg-blue-700 transition-all disabled:opacity-50"
                   >
                     {editingProduct ? "Cập nhật" : "Tạo mới"}

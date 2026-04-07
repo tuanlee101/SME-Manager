@@ -1,12 +1,14 @@
 import { initializeApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider, signInWithPopup, onAuthStateChanged, signOut } from "firebase/auth";
-import { getFirestore, collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, query, where, orderBy, onSnapshot, addDoc, serverTimestamp, runTransaction, getDocFromServer } from "firebase/firestore";
+import { getFirestore, collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, query, where, orderBy, onSnapshot, addDoc, serverTimestamp, runTransaction, getDocFromServer, writeBatch } from "firebase/firestore";
+import { getStorage, ref, uploadBytesResumable, getDownloadURL, deleteObject } from "firebase/storage";
 import firebaseConfig from "../firebase-applet-config.json";
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+export const storage = getStorage(app, `gs://${firebaseConfig.storageBucket}`);
 export const googleProvider = new GoogleAuthProvider();
 
 // Operation types for error handling
@@ -74,5 +76,6 @@ async function testConnection() {
 testConnection();
 
 export { 
-  collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, query, where, orderBy, onSnapshot, addDoc, serverTimestamp, runTransaction, signInWithPopup, onAuthStateChanged, signOut 
+  collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, query, where, orderBy, onSnapshot, addDoc, serverTimestamp, runTransaction, writeBatch, signInWithPopup, onAuthStateChanged, signOut,
+  ref, uploadBytesResumable, getDownloadURL, deleteObject
 };

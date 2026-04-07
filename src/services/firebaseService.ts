@@ -1,5 +1,6 @@
 import { 
   db, 
+  storage,
   collection, 
   doc, 
   getDoc, 
@@ -14,9 +15,48 @@ import {
   addDoc, 
   serverTimestamp, 
   runTransaction,
+  writeBatch,
+  ref,
+  uploadBytesResumable,
+  getDownloadURL,
+  deleteObject,
   OperationType,
   handleFirestoreError
 } from "../firebase";
+
+// --- Storage ---
+export const uploadProductImage = (
+  file: File,
+  onProgress: (progress: number) => void
+): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const ext = file.name.split(".").pop();
+    const path = `products/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
+    const storageRef = ref(storage, path);
+    const uploadTask = uploadBytesResumable(storageRef, file);
+
+    uploadTask.on(
+      "state_changed",
+      (snapshot) => {
+        onProgress(Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100));
+      },
+      (error) => reject(error),
+      async () => {
+        const url = await getDownloadURL(uploadTask.snapshot.ref);
+        resolve(url);
+      }
+    );
+  });
+};
+
+export const deleteProductImage = async (url: string) => {
+  try {
+    const storageRef = ref(storage, url);
+    await deleteObject(storageRef);
+  } catch {
+    // Ignore if file not found
+  }
+};
 
 // --- Categories ---
 export const getCategories = (callback: (data: any[]) => void) => {
@@ -62,7 +102,45 @@ export const deleteCategory = async (id: string) => {
   }
 };
 
-// --- Products ---
+export const bulkDeleteCategories = async (ids: string[]) => {
+  try {
+    const batch = writeBatch(db);
+    ids.forEach(id => {
+      batch.update(doc(db, "categories", id), { isDeleted: true, updatedAt: serverTimestamp() });
+    });
+    await batch.commit();
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, "categories/bulk");
+  }
+};
+
+export const getOrCreateCategory = async (name: string): Promise<string> => {
+  try {
+    const normalized = name.trim();
+    // Check if category exists (case-insensitive via normalized name)
+    const q = query(collection(db, "categories"), where("isDeleted", "==", false));
+    const snapshot = await getDocs(q);
+    const existing = snapshot.docs.find(
+      d => d.data().name?.trim().toLowerCase() === normalized.toLowerCase()
+    );
+    if (existing) return existing.id;
+
+    // Create new category
+    const docRef = await addDoc(collection(db, "categories"), {
+      name: normalized,
+      description: "",
+      isDeleted: false,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    });
+    return docRef.id;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.CREATE, "categories");
+    throw error;
+  }
+};
+
+
 export const getProducts = (categoryId: string | null, search: string | null, callback: (data: any[]) => void) => {
   let q = query(collection(db, "products"), where("isDeleted", "==", false));
   
@@ -114,19 +192,39 @@ export const deleteProduct = async (id: string) => {
   }
 };
 
+export const bulkDeleteProducts = async (ids: string[]) => {
+  try {
+    const batch = writeBatch(db);
+    ids.forEach(id => {
+      batch.update(doc(db, "products", id), { isDeleted: true, updatedAt: serverTimestamp() });
+    });
+    await batch.commit();
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, "products/bulk");
+  }
+};
+
 export const bulkCreateProducts = async (products: any[]) => {
   try {
-    await runTransaction(db, async (transaction) => {
-      for (const p of products) {
+    const BATCH_SIZE = 499;
+    for (let i = 0; i < products.length; i += BATCH_SIZE) {
+      const batch = writeBatch(db);
+      const chunk = products.slice(i, i + BATCH_SIZE);
+      for (const p of chunk) {
         const docRef = doc(collection(db, "products"));
-        transaction.set(docRef, {
-          ...p,
+        // Strip undefined fields — Firestore rejects them
+        const clean = Object.fromEntries(
+          Object.entries(p).filter(([, v]) => v !== undefined)
+        );
+        batch.set(docRef, {
+          ...clean,
           isDeleted: false,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp()
         });
       }
-    });
+      await batch.commit();
+    }
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, "products/bulk");
   }
@@ -179,6 +277,18 @@ export const deleteCustomer = async (id: string) => {
   }
 };
 
+export const bulkDeleteCustomers = async (ids: string[]) => {
+  try {
+    const batch = writeBatch(db);
+    ids.forEach(id => {
+      batch.update(doc(db, "customers", id), { isDeleted: true, updatedAt: serverTimestamp() });
+    });
+    await batch.commit();
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, "customers/bulk");
+  }
+};
+
 // --- Invoices ---
 export const getInvoices = (callback: (data: any[]) => void) => {
   const q = query(collection(db, "invoices"), where("isDeleted", "==", false), orderBy("createdAt", "desc"));
@@ -186,6 +296,18 @@ export const getInvoices = (callback: (data: any[]) => void) => {
     const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
     callback(data);
   }, (error) => handleFirestoreError(error, OperationType.LIST, "invoices"));
+};
+
+export const bulkDeleteInvoices = async (ids: string[]) => {
+  try {
+    const batch = writeBatch(db);
+    ids.forEach(id => {
+      batch.update(doc(db, "invoices", id), { isDeleted: true, updatedAt: serverTimestamp() });
+    });
+    await batch.commit();
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, "invoices/bulk");
+  }
 };
 
 export const createInvoice = async (data: { customerId: string, items: any[], status: string }) => {

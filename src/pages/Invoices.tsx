@@ -1,9 +1,9 @@
 import React from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { getInvoices } from "../services/firebaseService";
+import { getInvoices, bulkDeleteInvoices } from "../services/firebaseService";
 import { cn } from "../lib/utils";
-import { Plus, Search, FileText, ChevronRight, Download, Eye, Calendar, User } from "lucide-react";
+import { Plus, Search, FileText, Download, Eye, Calendar, User, Trash2 } from "lucide-react";
 import { format } from "date-fns";
 import { motion } from "motion/react";
 
@@ -11,9 +11,25 @@ const formatCurrency = (amount: number) => {
   return new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" }).format(amount);
 };
 
+import { useMutation } from "@tanstack/react-query";
+
 export default function Invoices() {
   const [invoices, setInvoices] = React.useState<any[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
+  const [selected, setSelected] = React.useState<Set<string>>(new Set());
+
+  const allSelected = invoices.length > 0 && selected.size === invoices.length;
+  const toggleAll = () => setSelected(allSelected ? new Set() : new Set(invoices.map(i => i.id)));
+  const toggleOne = (id: string) => setSelected(prev => {
+    const next = new Set(prev);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
+  });
+
+  const bulkDeleteMutation = useMutation({
+    mutationFn: (ids: string[]) => bulkDeleteInvoices(ids),
+    onSuccess: () => setSelected(new Set()),
+  });
 
   React.useEffect(() => {
     const unsubscribe = getInvoices((data) => {
@@ -34,12 +50,26 @@ export default function Invoices() {
           <h2 className="text-3xl font-bold text-gray-900 tracking-tight">Hóa đơn</h2>
           <p className="text-gray-500 mt-1">Quản lý các giao dịch bán hàng của bạn.</p>
         </div>
-        <Link
-          to="/invoices/create"
-          className="bg-blue-600 text-white px-6 py-3 rounded-2xl font-semibold shadow-lg shadow-blue-200 hover:bg-blue-700 transition-all flex items-center gap-2"
-        >
-          <Plus size={20} /> Tạo hóa đơn mới
-        </Link>
+        <div className="flex items-center gap-3">
+          {selected.size > 0 && (
+            <button
+              onClick={() => {
+                if (confirm(`Xóa ${selected.size} hóa đơn đã chọn?`)) {
+                  bulkDeleteMutation.mutate(Array.from(selected));
+                }
+              }}
+              className="bg-red-500 text-white px-6 py-3 rounded-2xl font-semibold shadow-lg shadow-red-200 hover:bg-red-600 transition-all flex items-center gap-2"
+            >
+              <Trash2 size={18} /> Xóa {selected.size} mục
+            </button>
+          )}
+          <Link
+            to="/invoices/create"
+            className="bg-blue-600 text-white px-6 py-3 rounded-2xl font-semibold shadow-lg shadow-blue-200 hover:bg-blue-700 transition-all flex items-center gap-2"
+          >
+            <Plus size={20} /> Tạo hóa đơn mới
+          </Link>
+        </div>
       </div>
 
       <div className="bg-white rounded-3xl border border-gray-100 shadow-sm shadow-gray-200/50 overflow-hidden">
@@ -58,6 +88,9 @@ export default function Invoices() {
           <table className="w-full text-left">
             <thead>
               <tr className="bg-gray-50/50 text-gray-500 text-xs font-bold uppercase tracking-wider">
+                <th className="px-6 py-4">
+                  <input type="checkbox" checked={allSelected} onChange={toggleAll} className="w-4 h-4 rounded accent-blue-600 cursor-pointer" />
+                </th>
                 <th className="px-8 py-4">Số hóa đơn</th>
                 <th className="px-8 py-4">Khách hàng</th>
                 <th className="px-8 py-4">Ngày tạo</th>
@@ -68,7 +101,10 @@ export default function Invoices() {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {invoices?.map((invoice: any) => (
-                <tr key={invoice.id} className="hover:bg-gray-50/50 transition-colors group">
+                <tr key={invoice.id} className={`hover:bg-gray-50/50 transition-colors group ${selected.has(invoice.id) ? "bg-blue-50/50" : ""}`}>
+                  <td className="px-6 py-5">
+                    <input type="checkbox" checked={selected.has(invoice.id)} onChange={() => toggleOne(invoice.id)} className="w-4 h-4 rounded accent-blue-600 cursor-pointer" />
+                  </td>
                   <td className="px-8 py-5">
                     <div className="flex items-center gap-3">
                       <div className="w-10 h-10 bg-gray-50 rounded-xl flex items-center justify-center text-gray-400 group-hover:bg-blue-50 group-hover:text-blue-600 transition-colors">
