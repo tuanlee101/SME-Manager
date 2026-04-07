@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run:*)",
+      "Bash(export PATH=\"/usr/local/bin:/opt/homebrew/bin:$PATH\")",
+      "Bash(/opt/homebrew/bin/npm run:*)",
+      "Read(//opt/homebrew/Cellar/node/25.9.0_1/bin/**)",
+      "Bash(/opt/homebrew/bin/node --version)",
+      "Bash(PATH=\"/opt/homebrew/bin:$PATH\" /opt/homebrew/bin/node /Users/tuanlee/Desktop/Projects/SME-Manager/node_modules/.bin/vite --port=3000 --host=0.0.0.0)"
+    ]
+  }
+}
